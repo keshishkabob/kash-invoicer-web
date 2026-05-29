@@ -17,7 +17,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  getInvoices, getTimeEntries, getClients, createInvoice, updateInvoiceStatus, voidInvoice,
+  getInvoices, getInvoice, getInvoiceLineItems, getTimeEntries, getClients,
+  createInvoice, updateInvoice, updateInvoiceStatus, voidInvoice,
   nextInvoiceNumber, type InvoiceSummary, type TimeEntry, type Client,
 } from "@/lib/db";
 
@@ -62,6 +63,7 @@ export default function InvoicesPage() {
     { description: "", project: "", hours: "", rate: "", amount: "" },
   ]);
   const [saving, setSaving] = useState(false);
+  const [editingInvoice, setEditingInvoice] = useState<InvoiceSummary | null>(null);
 
   async function load() {
     setLoading(true);
@@ -107,18 +109,21 @@ export default function InvoicesPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    const entryIds = Array.from(selectedEntries);
+    if (!clientName) { toast.error("Client name is required."); return; }
+
     const lineItems: any[] = [];
 
-    for (const id of entryIds) {
-      const entry = unbilled.find((e) => e.id === id)!;
-      lineItems.push({
-        description: entry.description || entry.project,
-        project: entry.project,
-        hours: entry.hours,
-        rate: entry.rate,
-        amount: entry.hours * entry.rate,
-      });
+    if (!editingInvoice) {
+      for (const id of Array.from(selectedEntries)) {
+        const entry = unbilled.find((e) => e.id === id)!;
+        lineItems.push({
+          description: entry.description || entry.project,
+          project: entry.project,
+          hours: entry.hours,
+          rate: entry.rate,
+          amount: entry.hours * entry.rate,
+        });
+      }
     }
 
     for (const row of manualRows) {
@@ -134,29 +139,53 @@ export default function InvoicesPage() {
       }
     }
 
-    if (!lineItems.length) { toast.error("Select at least one entry or add a line item."); return; }
-    if (!clientName) { toast.error("Client name is required."); return; }
+    if (!lineItems.length) { toast.error("Add at least one line item."); return; }
 
     setSaving(true);
     try {
-      const inv = await createInvoice({
-        invoice_number: invNumber,
-        client_name: clientName,
-        client_contact: clientContact || undefined,
-        client_address: clientAddress || undefined,
-        period_start: periodStart || undefined,
-        period_end: periodEnd || undefined,
-        issue_date: issueDate,
-        due_date: dueDate || undefined,
-        tax_rate: parseFloat(taxRate) / 100,
-        po_ref: poRef || undefined,
-        notes: notes || undefined,
-        line_items: lineItems,
-        time_entry_ids: entryIds,
-      });
-      toast.success(`Invoice ${inv.invoice_number} created!`);
+      if (editingInvoice) {
+        await updateInvoice(editingInvoice.id, {
+          invoice_number: invNumber,
+          client_name: clientName,
+          client_contact: clientContact || null,
+          client_address: clientAddress || null,
+          period_start: periodStart || null,
+          period_end: periodEnd || null,
+          issue_date: issueDate,
+          due_date: dueDate || null,
+          tax_rate: parseFloat(taxRate) / 100,
+          po_ref: poRef || null,
+          notes: notes || null,
+          line_items: lineItems,
+        });
+        toast.success(`Invoice ${invNumber} updated.`);
+        setEditingInvoice(null);
+      } else {
+        const entryIds = Array.from(selectedEntries);
+        const inv = await createInvoice({
+          invoice_number: invNumber,
+          client_name: clientName,
+          client_contact: clientContact || undefined,
+          client_address: clientAddress || undefined,
+          period_start: periodStart || undefined,
+          period_end: periodEnd || undefined,
+          issue_date: issueDate,
+          due_date: dueDate || undefined,
+          tax_rate: parseFloat(taxRate) / 100,
+          po_ref: poRef || undefined,
+          notes: notes || undefined,
+          line_items: lineItems,
+          time_entry_ids: entryIds,
+        });
+        toast.success(`Invoice ${inv.invoice_number} created!`);
+        setSelectedEntries(new Set());
+      }
       setActiveTab("list");
-      setSelectedEntries(new Set());
+      setManualRows([
+        { description: "", project: "", hours: "", rate: "", amount: "" },
+        { description: "", project: "", hours: "", rate: "", amount: "" },
+        { description: "", project: "", hours: "", rate: "", amount: "" },
+      ]);
       load();
     } catch (err: any) {
       toast.error(err.message);
@@ -174,6 +203,47 @@ export default function InvoicesPage() {
     } catch (err: any) { toast.error(err.message); }
   }
 
+  async function handleEdit(inv: InvoiceSummary) {
+    try {
+      const [full, items] = await Promise.all([
+        getInvoice(inv.id),
+        getInvoiceLineItems(inv.id),
+      ]);
+      setEditingInvoice(inv);
+      setInvNumber(full.invoice_number);
+      setIssueDate(full.issue_date);
+      setDueDate(full.due_date ?? "");
+      setClientName(full.client_name);
+      setClientContact(full.client_contact ?? "");
+      setClientAddress(full.client_address ?? "");
+      setPeriodStart(full.period_start ?? "");
+      setPeriodEnd(full.period_end ?? "");
+      setTaxRate(String(Number((full.tax_rate * 100).toFixed(4))));
+      setPoRef(full.po_ref ?? "");
+      setNotes(full.notes ?? "");
+      setSelectedEntries(new Set());
+      const rows = items.map((item) => ({
+        description: item.description,
+        project: item.project ?? "",
+        hours: item.hours?.toString() ?? "",
+        rate: item.rate?.toString() ?? "",
+        amount: item.amount.toString(),
+      }));
+      setManualRows(rows.length ? rows : [{ description: "", project: "", hours: "", rate: "", amount: "" }]);
+      setActiveTab("create");
+    } catch (err: any) { toast.error(err.message); }
+  }
+
+  function cancelEdit() {
+    setEditingInvoice(null);
+    setSelectedEntries(new Set());
+    setManualRows([
+      { description: "", project: "", hours: "", rate: "", amount: "" },
+      { description: "", project: "", hours: "", rate: "", amount: "" },
+      { description: "", project: "", hours: "", rate: "", amount: "" },
+    ]);
+  }
+
   const totalInvoiced = invoices.reduce((s, i) => s + i.total, 0);
   const totalPaid = invoices.reduce((s, i) => s + i.total_paid, 0);
   const totalDue = invoices.reduce((s, i) => s + i.balance_due, 0);
@@ -184,8 +254,8 @@ export default function InvoicesPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="list">All Invoices</TabsTrigger>
-          <TabsTrigger value="create">Create Invoice</TabsTrigger>
+          <TabsTrigger value="list" onClick={() => { if (editingInvoice) cancelEdit(); }}>All Invoices</TabsTrigger>
+          <TabsTrigger value="create">{editingInvoice ? `Edit ${editingInvoice.invoice_number}` : "Create Invoice"}</TabsTrigger>
         </TabsList>
 
         {/* ── All Invoices ── */}
@@ -246,6 +316,7 @@ export default function InvoicesPage() {
                         <TableCell className="text-right font-medium">${Number(inv.balance_due).toFixed(2)}</TableCell>
                         <TableCell>
                           <div className="flex gap-2 justify-end items-center">
+                            <Button size="sm" variant="outline" onClick={() => handleEdit(inv)}>Edit</Button>
                             <a href={`/api/invoice-pdf?id=${inv.id}`} target="_blank">
                               <Button size="sm" variant="outline">PDF</Button>
                             </a>
@@ -272,8 +343,8 @@ export default function InvoicesPage() {
         <TabsContent value="create" className="mt-4">
           <form onSubmit={handleCreate} className="space-y-6 max-w-4xl">
 
-            {/* Unbilled entries */}
-            <Card>
+            {/* Unbilled entries (create only) */}
+            {!editingInvoice && <Card>
               <CardHeader className="pb-2"><CardTitle className="text-base">Unbilled Time Entries</CardTitle></CardHeader>
               <CardContent className="space-y-2">
                 {unbilled.length === 0 ? (
@@ -307,7 +378,7 @@ export default function InvoicesPage() {
                   </>
                 )}
               </CardContent>
-            </Card>
+            </Card>}
 
             {/* Invoice details */}
             <Card>
@@ -379,9 +450,9 @@ export default function InvoicesPage() {
               </CardContent>
             </Card>
 
-            {/* Manual line items */}
+            {/* Line items */}
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-base">Manual Line Items (optional)</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-base">{editingInvoice ? "Line Items" : "Manual Line Items (optional)"}</CardTitle></CardHeader>
               <CardContent className="space-y-2">
                 {manualRows.map((row, i) => (
                   <div key={i} className="grid grid-cols-5 gap-2">
@@ -395,12 +466,23 @@ export default function InvoicesPage() {
                       onChange={(e) => { const r = [...manualRows]; r[i] = { ...r[i], amount: e.target.value }; setManualRows(r); }} />
                   </div>
                 ))}
+                <Button type="button" variant="outline" size="sm"
+                  onClick={() => setManualRows([...manualRows, { description: "", project: "", hours: "", rate: "", amount: "" }])}>
+                  + Add row
+                </Button>
               </CardContent>
             </Card>
 
-            <Button type="submit" disabled={saving} className="w-full">
-              {saving ? "Saving…" : "Save Invoice"}
-            </Button>
+            <div className="flex gap-3">
+              <Button type="submit" disabled={saving} className="flex-1">
+                {saving ? "Saving…" : editingInvoice ? "Save Changes" : "Save Invoice"}
+              </Button>
+              {editingInvoice && (
+                <Button type="button" variant="outline" onClick={() => { cancelEdit(); setActiveTab("list"); }}>
+                  Cancel
+                </Button>
+              )}
+            </div>
           </form>
         </TabsContent>
       </Tabs>

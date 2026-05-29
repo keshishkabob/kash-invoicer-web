@@ -245,6 +245,54 @@ export async function createInvoice(params: {
   return invoice;
 }
 
+export async function updateInvoice(
+  id: string,
+  params: {
+    invoice_number?: string;
+    client_name?: string;
+    client_contact?: string | null;
+    client_address?: string | null;
+    period_start?: string | null;
+    period_end?: string | null;
+    issue_date?: string;
+    due_date?: string | null;
+    tax_rate?: number;
+    po_ref?: string | null;
+    notes?: string | null;
+    line_items: Omit<LineItem, "id" | "invoice_id" | "sort_order">[];
+  }
+): Promise<Invoice> {
+  const { line_items, ...invoiceData } = params;
+
+  const { data: invoice, error: invErr } = await supabase
+    .from("invoices")
+    .update(invoiceData)
+    .eq("id", id)
+    .select()
+    .single();
+  if (invErr) throw invErr;
+
+  const { error: delErr } = await supabase
+    .from("invoice_line_items")
+    .delete()
+    .eq("invoice_id", id);
+  if (delErr) throw delErr;
+
+  const items = line_items.map((item, i) => ({
+    ...item,
+    invoice_id: id,
+    sort_order: i,
+  }));
+  if (items.length) {
+    const { error: itemErr } = await supabase
+      .from("invoice_line_items")
+      .insert(items);
+    if (itemErr) throw itemErr;
+  }
+
+  return invoice;
+}
+
 export async function updateInvoiceStatus(
   id: string,
   status: Invoice["status"]
