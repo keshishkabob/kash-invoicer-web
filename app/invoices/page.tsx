@@ -454,15 +454,17 @@ export default function InvoicesPage() {
               <CardHeader className="pb-2"><CardTitle className="text-base">{editingInvoice ? "Line Items" : "Manual Line Items (optional)"}</CardTitle></CardHeader>
               <CardContent className="space-y-2">
                 {manualRows.map((row, i) => (
-                  <div key={i} className="grid grid-cols-5 gap-2">
-                    <Input className="col-span-2" placeholder="Description" value={row.description}
+                  <div key={i} className="grid grid-cols-[1fr_1fr_auto_auto_auto_auto] gap-2 items-center">
+                    <Input placeholder="Description" value={row.description}
                       onChange={(e) => { const r = [...manualRows]; r[i] = { ...r[i], description: e.target.value }; setManualRows(r); }} />
                     <Input placeholder="Project" value={row.project}
                       onChange={(e) => { const r = [...manualRows]; r[i] = { ...r[i], project: e.target.value }; setManualRows(r); }} />
-                    <Input type="number" placeholder="Hours" value={row.hours}
+                    <Input className="w-24" type="number" placeholder="Hours" value={row.hours}
                       onChange={(e) => { const r = [...manualRows]; r[i] = { ...r[i], hours: e.target.value }; setManualRows(r); }} />
-                    <Input type="number" placeholder="Amount $" value={row.amount}
+                    <Input className="w-28" type="number" placeholder="Amount $" value={row.amount}
                       onChange={(e) => { const r = [...manualRows]; r[i] = { ...r[i], amount: e.target.value }; setManualRows(r); }} />
+                    <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive px-2"
+                      onClick={() => setManualRows(manualRows.filter((_, j) => j !== i))}>✕</Button>
                   </div>
                 ))}
                 <Button type="button" variant="outline" size="sm"
