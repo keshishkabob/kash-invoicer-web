@@ -34,6 +34,10 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant={STATUS_COLORS[status] as any}>{status}</Badge>;
 }
 
+type ManualRow = { description: string; project: string; hours: string; rate: string; amount: string };
+
+const emptyRow = (): ManualRow => ({ description: "", project: "", hours: "", rate: "", amount: "" });
+
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<InvoiceSummary[]>([]);
   const [unbilled, setUnbilled] = useState<TimeEntry[]>([]);
@@ -42,7 +46,7 @@ export default function InvoicesPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [activeTab, setActiveTab] = useState("list");
 
-  // Create form state
+  // Form state (shared by create and edit)
   const [invNumber, setInvNumber] = useState("");
   const [issueDate, setIssueDate] = useState(today());
   const [dueDate, setDueDate] = useState(() => {
@@ -57,16 +61,15 @@ export default function InvoicesPage() {
   const [poRef, setPoRef] = useState("");
   const [notes, setNotes] = useState("");
   const [selectedEntries, setSelectedEntries] = useState<Set<string>>(new Set());
-  const [manualRows, setManualRows] = useState<
-    { description: string; project: string; hours: string; rate: string; amount: string; time_entry_id?: string }[]
-  >([
-    { description: "", project: "", hours: "", rate: "", amount: "" },
-    { description: "", project: "", hours: "", rate: "", amount: "" },
-    { description: "", project: "", hours: "", rate: "", amount: "" },
-  ]);
+  const [manualRows, setManualRows] = useState<ManualRow[]>([emptyRow(), emptyRow(), emptyRow()]);
   const [saving, setSaving] = useState(false);
+
+  // Edit-only state
   const [editingInvoice, setEditingInvoice] = useState<InvoiceSummary | null>(null);
-  const [unlinkEntryIds, setUnlinkEntryIds] = useState<string[]>([]);
+  // Time entries already on the invoice (shown as their own section during edit)
+  const [linkedEntries, setLinkedEntries] = useState<TimeEntry[]>([]);
+  // IDs of linked entries the user removed (to be unlinked on save)
+  const [removedEntryIds, setRemovedEntryIds] = useState<string[]>([]);
 
   async function load() {
     setLoading(true);
@@ -105,25 +108,38 @@ export default function InvoicesPage() {
     });
   }
 
-  const linkedEntryIds = new Set(manualRows.map((r) => r.time_entry_id).filter(Boolean));
-  const displayUnbilled = editingInvoice
-    ? unbilled.filter((e) => !linkedEntryIds.has(e.id))
-    : unbilled;
+  // In edit mode, hide entries that are already on the invoice
+  const linkedIds = new Set(linkedEntries.map((e) => e.id));
+  const displayUnbilled = editingInvoice ? unbilled.filter((e) => !linkedIds.has(e.id)) : unbilled;
 
   const selectedTotal = Array.from(selectedEntries).reduce((s, id) => {
     const e = displayUnbilled.find((e) => e.id === id);
     return s + (e ? e.hours * e.rate : 0);
   }, 0);
 
-  async function handleCreate(e: React.FormEvent) {
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!clientName) { toast.error("Client name is required."); return; }
 
-    const lineItems: any[] = [];
     const entryIds = Array.from(selectedEntries);
+    const lineItems: any[] = [];
 
+    // In edit mode: keep the remaining linked entries as line items
+    if (editingInvoice) {
+      for (const entry of linkedEntries) {
+        lineItems.push({
+          description: entry.description || entry.project,
+          project: entry.project,
+          hours: entry.hours,
+          rate: entry.rate,
+          amount: entry.hours * entry.rate,
+        });
+      }
+    }
+
+    // Newly selected unbilled entries
     for (const id of entryIds) {
-      const entry = unbilled.find((e) => e.id === id)!;
+      const entry = displayUnbilled.find((e) => e.id === id)!;
       lineItems.push({
         description: entry.description || entry.project,
         project: entry.project,
@@ -133,6 +149,7 @@ export default function InvoicesPage() {
       });
     }
 
+    // Manual rows
     for (const row of manualRows) {
       if (row.description.trim()) {
         const amt = parseFloat(row.amount) || (parseFloat(row.hours) || 0) * (parseFloat(row.rate) || 0);
@@ -165,11 +182,10 @@ export default function InvoicesPage() {
           notes: notes || null,
           line_items: lineItems,
           time_entry_ids: entryIds.length ? entryIds : undefined,
-          unlink_time_entry_ids: unlinkEntryIds.length ? unlinkEntryIds : undefined,
+          unlink_time_entry_ids: removedEntryIds.length ? removedEntryIds : undefined,
         });
         toast.success(`Invoice ${invNumber} updated.`);
-        setEditingInvoice(null);
-        setUnlinkEntryIds([]);
+        resetEditState();
       } else {
         const inv = await createInvoice({
           invoice_number: invNumber,
@@ -190,17 +206,21 @@ export default function InvoicesPage() {
         setSelectedEntries(new Set());
       }
       setActiveTab("list");
-      setManualRows([
-        { description: "", project: "", hours: "", rate: "", amount: "" },
-        { description: "", project: "", hours: "", rate: "", amount: "" },
-        { description: "", project: "", hours: "", rate: "", amount: "" },
-      ]);
+      setManualRows([emptyRow(), emptyRow(), emptyRow()]);
       load();
     } catch (err: any) {
       toast.error(err.message);
     } finally {
       setSaving(false);
     }
+  }
+
+  function resetEditState() {
+    setEditingInvoice(null);
+    setLinkedEntries([]);
+    setRemovedEntryIds([]);
+    setSelectedEntries(new Set());
+    setManualRows([emptyRow(), emptyRow(), emptyRow()]);
   }
 
   async function handleStatusChange(id: string, status: string) {
@@ -220,6 +240,7 @@ export default function InvoicesPage() {
         getTimeEntries({ invoiceId: inv.id }),
         getTimeEntries({ unbilledOnly: true }),
       ]);
+
       setUnbilled(freshUnbilled);
       setEditingInvoice(inv);
       setInvNumber(full.invoice_number);
@@ -234,40 +255,38 @@ export default function InvoicesPage() {
       setPoRef(full.po_ref ?? "");
       setNotes(full.notes ?? "");
       setSelectedEntries(new Set());
-      setUnlinkEntryIds([]);
+      setRemovedEntryIds([]);
 
-      // Tag each line item row with the time entry it came from (matched by description+hours+rate)
+      // Match each line item to a linked time entry by description + hours + rate.
+      // Matched items are shown in the "Linked time entries" section.
+      // Unmatched items (manually added) go into manual rows.
       const unmatched = [...linked];
-      const rows = items.map((item) => {
+      const matchedEntries: TimeEntry[] = [];
+      const otherRows: ManualRow[] = [];
+
+      for (const item of items) {
         const idx = unmatched.findIndex(
           (t) => (t.description || t.project) === item.description &&
                  Number(t.hours) === Number(item.hours) &&
                  Number(t.rate) === Number(item.rate)
         );
-        const time_entry_id = idx >= 0 ? unmatched.splice(idx, 1)[0].id : undefined;
-        return {
-          description: item.description,
-          project: item.project ?? "",
-          hours: item.hours?.toString() ?? "",
-          rate: item.rate?.toString() ?? "",
-          amount: item.amount.toString(),
-          time_entry_id,
-        };
-      });
-      setManualRows(rows.length ? rows : [{ description: "", project: "", hours: "", rate: "", amount: "" }]);
+        if (idx >= 0) {
+          matchedEntries.push(unmatched.splice(idx, 1)[0]);
+        } else {
+          otherRows.push({
+            description: item.description,
+            project: item.project ?? "",
+            hours: item.hours?.toString() ?? "",
+            rate: item.rate?.toString() ?? "",
+            amount: item.amount.toString(),
+          });
+        }
+      }
+
+      setLinkedEntries(matchedEntries);
+      setManualRows(otherRows.length ? otherRows : [emptyRow()]);
       setActiveTab("create");
     } catch (err: any) { toast.error(err.message); }
-  }
-
-  function cancelEdit() {
-    setEditingInvoice(null);
-    setSelectedEntries(new Set());
-    setUnlinkEntryIds([]);
-    setManualRows([
-      { description: "", project: "", hours: "", rate: "", amount: "" },
-      { description: "", project: "", hours: "", rate: "", amount: "" },
-      { description: "", project: "", hours: "", rate: "", amount: "" },
-    ]);
   }
 
   const totalInvoiced = invoices.reduce((s, i) => s + i.total, 0);
@@ -280,7 +299,7 @@ export default function InvoicesPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="list" onClick={() => { if (editingInvoice) cancelEdit(); }}>All Invoices</TabsTrigger>
+          <TabsTrigger value="list" onClick={() => { if (editingInvoice) resetEditState(); }}>All Invoices</TabsTrigger>
           <TabsTrigger value="create">{editingInvoice ? `Edit ${editingInvoice.invoice_number}` : "Create Invoice"}</TabsTrigger>
         </TabsList>
 
@@ -365,11 +384,36 @@ export default function InvoicesPage() {
           </Card>
         </TabsContent>
 
-        {/* ── Create Invoice ── */}
+        {/* ── Create / Edit Invoice ── */}
         <TabsContent value="create" className="mt-4">
-          <form onSubmit={handleCreate} className="space-y-6 max-w-4xl">
+          <form onSubmit={handleSave} className="space-y-6 max-w-4xl">
 
-            {/* Unbilled entries */}
+            {/* Linked time entries — edit mode only */}
+            {editingInvoice && linkedEntries.length > 0 && (
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-base">Time Entries on This Invoice</CardTitle></CardHeader>
+                <CardContent className="space-y-1">
+                  {linkedEntries.map((e) => (
+                    <div key={e.id} className="flex items-center justify-between py-1">
+                      <span className="text-sm">
+                        <span className="font-medium">{e.client}</span>
+                        {" · "}{e.entry_date}{" · "}{e.project}
+                        {e.description && <span className="text-muted-foreground"> · {e.description}</span>}
+                        {" · "}{e.hours}h @ ${Number(e.rate).toFixed(2)}/hr
+                        {" = "}<span className="font-medium">${(e.hours * e.rate).toFixed(2)}</span>
+                      </span>
+                      <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive px-2 ml-4 shrink-0"
+                        onClick={() => {
+                          setRemovedEntryIds((prev) => [...prev, e.id]);
+                          setLinkedEntries((prev) => prev.filter((t) => t.id !== e.id));
+                        }}>✕</Button>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Unbilled entries (add to invoice) */}
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-base">{editingInvoice ? "Add Unbilled Time Entries" : "Unbilled Time Entries"}</CardTitle></CardHeader>
               <CardContent className="space-y-2">
@@ -476,12 +520,12 @@ export default function InvoicesPage() {
               </CardContent>
             </Card>
 
-            {/* Line items */}
+            {/* Manual line items */}
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-base">{editingInvoice ? "Line Items" : "Manual Line Items (optional)"}</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-base">Manual Line Items (optional)</CardTitle></CardHeader>
               <CardContent className="space-y-2">
                 {manualRows.map((row, i) => (
-                  <div key={i} className="grid grid-cols-[1fr_1fr_auto_auto_auto_auto] gap-2 items-center">
+                  <div key={i} className="grid grid-cols-[1fr_1fr_auto_auto_auto] gap-2 items-center">
                     <Input placeholder="Description" value={row.description}
                       onChange={(e) => { const r = [...manualRows]; r[i] = { ...r[i], description: e.target.value }; setManualRows(r); }} />
                     <Input placeholder="Project" value={row.project}
@@ -491,14 +535,11 @@ export default function InvoicesPage() {
                     <Input className="w-28" type="number" placeholder="Amount $" value={row.amount}
                       onChange={(e) => { const r = [...manualRows]; r[i] = { ...r[i], amount: e.target.value }; setManualRows(r); }} />
                     <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive px-2"
-                      onClick={() => {
-                        if (row.time_entry_id) setUnlinkEntryIds((prev) => [...prev, row.time_entry_id!]);
-                        setManualRows(manualRows.filter((_, j) => j !== i));
-                      }}>✕</Button>
+                      onClick={() => setManualRows(manualRows.filter((_, j) => j !== i))}>✕</Button>
                   </div>
                 ))}
                 <Button type="button" variant="outline" size="sm"
-                  onClick={() => setManualRows([...manualRows, { description: "", project: "", hours: "", rate: "", amount: "" }])}>
+                  onClick={() => setManualRows([...manualRows, emptyRow()])}>
                   + Add row
                 </Button>
               </CardContent>
@@ -509,7 +550,7 @@ export default function InvoicesPage() {
                 {saving ? "Saving…" : editingInvoice ? "Save Changes" : "Save Invoice"}
               </Button>
               {editingInvoice && (
-                <Button type="button" variant="outline" onClick={() => { cancelEdit(); setActiveTab("list"); }}>
+                <Button type="button" variant="outline" onClick={() => { resetEditState(); setActiveTab("list"); }}>
                   Cancel
                 </Button>
               )}
