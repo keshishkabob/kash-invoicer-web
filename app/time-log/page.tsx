@@ -190,6 +190,16 @@ export default function TimeLogPage() {
     }
   }
 
+  async function handleUnlink(id: string) {
+    try {
+      await updateTimeEntry(id, { invoice_id: null });
+      toast.success("Entry unlinked — now unbilled.");
+      load();
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  }
+
   async function handleDelete(id: string) {
     if (!confirm("Delete this entry?")) return;
     try {
@@ -334,6 +344,9 @@ export default function TimeLogPage() {
                     <TableCell>
                       <div className="flex gap-2 justify-end">
                         <Button size="sm" variant="ghost" onClick={() => openEdit(e)}>Edit</Button>
+                        {e.invoice_id && (
+                          <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => handleUnlink(e.id)}>Unlink</Button>
+                        )}
                         <Button size="sm" variant="ghost" className="text-destructive" onClick={() => handleDelete(e.id)}>Delete</Button>
                       </div>
                     </TableCell>
