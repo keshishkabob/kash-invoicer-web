@@ -57,13 +57,16 @@ export default function InvoicesPage() {
   const [poRef, setPoRef] = useState("");
   const [notes, setNotes] = useState("");
   const [selectedEntries, setSelectedEntries] = useState<Set<string>>(new Set());
-  const [manualRows, setManualRows] = useState([
+  const [manualRows, setManualRows] = useState<
+    { description: string; project: string; hours: string; rate: string; amount: string; time_entry_id?: string }[]
+  >([
     { description: "", project: "", hours: "", rate: "", amount: "" },
     { description: "", project: "", hours: "", rate: "", amount: "" },
     { description: "", project: "", hours: "", rate: "", amount: "" },
   ]);
   const [saving, setSaving] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<InvoiceSummary | null>(null);
+  const [unlinkEntryIds, setUnlinkEntryIds] = useState<string[]>([]);
 
   async function load() {
     setLoading(true);
@@ -157,9 +160,11 @@ export default function InvoicesPage() {
           notes: notes || null,
           line_items: lineItems,
           time_entry_ids: entryIds.length ? entryIds : undefined,
+          unlink_time_entry_ids: unlinkEntryIds.length ? unlinkEntryIds : undefined,
         });
         toast.success(`Invoice ${invNumber} updated.`);
         setEditingInvoice(null);
+        setUnlinkEntryIds([]);
       } else {
         const inv = await createInvoice({
           invoice_number: invNumber,
@@ -204,9 +209,10 @@ export default function InvoicesPage() {
 
   async function handleEdit(inv: InvoiceSummary) {
     try {
-      const [full, items] = await Promise.all([
+      const [full, items, linked] = await Promise.all([
         getInvoice(inv.id),
         getInvoiceLineItems(inv.id),
+        getTimeEntries({ invoiceId: inv.id }),
       ]);
       setEditingInvoice(inv);
       setInvNumber(full.invoice_number);
@@ -221,13 +227,26 @@ export default function InvoicesPage() {
       setPoRef(full.po_ref ?? "");
       setNotes(full.notes ?? "");
       setSelectedEntries(new Set());
-      const rows = items.map((item) => ({
-        description: item.description,
-        project: item.project ?? "",
-        hours: item.hours?.toString() ?? "",
-        rate: item.rate?.toString() ?? "",
-        amount: item.amount.toString(),
-      }));
+      setUnlinkEntryIds([]);
+
+      // Tag each line item row with the time entry it came from (matched by description+hours+rate)
+      const unmatched = [...linked];
+      const rows = items.map((item) => {
+        const idx = unmatched.findIndex(
+          (t) => (t.description || t.project) === item.description &&
+                 Number(t.hours) === Number(item.hours) &&
+                 Number(t.rate) === Number(item.rate)
+        );
+        const time_entry_id = idx >= 0 ? unmatched.splice(idx, 1)[0].id : undefined;
+        return {
+          description: item.description,
+          project: item.project ?? "",
+          hours: item.hours?.toString() ?? "",
+          rate: item.rate?.toString() ?? "",
+          amount: item.amount.toString(),
+          time_entry_id,
+        };
+      });
       setManualRows(rows.length ? rows : [{ description: "", project: "", hours: "", rate: "", amount: "" }]);
       setActiveTab("create");
     } catch (err: any) { toast.error(err.message); }
@@ -236,6 +255,7 @@ export default function InvoicesPage() {
   function cancelEdit() {
     setEditingInvoice(null);
     setSelectedEntries(new Set());
+    setUnlinkEntryIds([]);
     setManualRows([
       { description: "", project: "", hours: "", rate: "", amount: "" },
       { description: "", project: "", hours: "", rate: "", amount: "" },
@@ -464,7 +484,10 @@ export default function InvoicesPage() {
                     <Input className="w-28" type="number" placeholder="Amount $" value={row.amount}
                       onChange={(e) => { const r = [...manualRows]; r[i] = { ...r[i], amount: e.target.value }; setManualRows(r); }} />
                     <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive px-2"
-                      onClick={() => setManualRows(manualRows.filter((_, j) => j !== i))}>✕</Button>
+                      onClick={() => {
+                        if (row.time_entry_id) setUnlinkEntryIds((prev) => [...prev, row.time_entry_id!]);
+                        setManualRows(manualRows.filter((_, j) => j !== i));
+                      }}>✕</Button>
                   </div>
                 ))}
                 <Button type="button" variant="outline" size="sm"

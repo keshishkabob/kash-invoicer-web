@@ -122,6 +122,7 @@ export async function getTimeEntries(opts?: {
   unbilledOnly?: boolean;
   startDate?: string;
   endDate?: string;
+  invoiceId?: string;
 }): Promise<TimeEntry[]> {
   let q = supabase
     .from("time_entries")
@@ -131,6 +132,7 @@ export async function getTimeEntries(opts?: {
   if (opts?.unbilledOnly) q = q.is("invoice_id", null);
   if (opts?.startDate) q = q.gte("entry_date", opts.startDate);
   if (opts?.endDate) q = q.lte("entry_date", opts.endDate);
+  if (opts?.invoiceId) q = q.eq("invoice_id", opts.invoiceId);
   const { data, error } = await q;
   if (error) throw error;
   return data;
@@ -261,9 +263,10 @@ export async function updateInvoice(
     notes?: string | null;
     line_items: Omit<LineItem, "id" | "invoice_id" | "sort_order">[];
     time_entry_ids?: string[];
+    unlink_time_entry_ids?: string[];
   }
 ): Promise<Invoice> {
-  const { line_items, time_entry_ids, ...invoiceData } = params;
+  const { line_items, time_entry_ids, unlink_time_entry_ids, ...invoiceData } = params;
 
   const { data: invoice, error: invErr } = await supabase
     .from("invoices")
@@ -289,6 +292,14 @@ export async function updateInvoice(
       .from("invoice_line_items")
       .insert(items);
     if (itemErr) throw itemErr;
+  }
+
+  if (unlink_time_entry_ids?.length) {
+    const { error: unlinkErr } = await supabase
+      .from("time_entries")
+      .update({ invoice_id: null })
+      .in("id", unlink_time_entry_ids);
+    if (unlinkErr) throw unlinkErr;
   }
 
   if (time_entry_ids?.length) {
