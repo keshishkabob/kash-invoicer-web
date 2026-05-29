@@ -260,9 +260,10 @@ export async function updateInvoice(
     po_ref?: string | null;
     notes?: string | null;
     line_items: Omit<LineItem, "id" | "invoice_id" | "sort_order">[];
+    time_entry_ids?: string[];
   }
 ): Promise<Invoice> {
-  const { line_items, ...invoiceData } = params;
+  const { line_items, time_entry_ids, ...invoiceData } = params;
 
   const { data: invoice, error: invErr } = await supabase
     .from("invoices")
@@ -288,6 +289,14 @@ export async function updateInvoice(
       .from("invoice_line_items")
       .insert(items);
     if (itemErr) throw itemErr;
+  }
+
+  if (time_entry_ids?.length) {
+    const { error: linkErr } = await supabase
+      .from("time_entries")
+      .update({ invoice_id: id })
+      .in("id", time_entry_ids);
+    if (linkErr) throw linkErr;
   }
 
   return invoice;

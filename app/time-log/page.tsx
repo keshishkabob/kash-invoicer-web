@@ -44,6 +44,70 @@ const emptyForm = () => ({
   billable: true,
 });
 
+type EntryFormValues = ReturnType<typeof emptyForm>;
+
+function EntryForm({ values, setValues, onSubmit, submitLabel, clients }: {
+  values: EntryFormValues;
+  setValues: (v: EntryFormValues) => void;
+  onSubmit: (e: React.FormEvent) => void;
+  submitLabel: string;
+  clients: Client[];
+}) {
+  const clientNames = clients.map((c) => c.name);
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1">
+          <Label>Date</Label>
+          <Input type="date" value={values.entry_date} onChange={(e) => setValues({ ...values, entry_date: e.target.value })} required />
+        </div>
+        <div className="space-y-1">
+          <Label>Client</Label>
+          {clientNames.length > 0 ? (
+            <Select value={values.client} onValueChange={(v) => {
+              if (!v) return;
+              const c = clients.find((c) => c.name === v);
+              setValues({ ...values, client: v as string, rate: c?.default_rate ? String(c.default_rate) : values.rate });
+            }}>
+              <SelectTrigger><SelectValue placeholder="Select client" /></SelectTrigger>
+              <SelectContent>
+                {clientNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input value={values.client} onChange={(e) => setValues({ ...values, client: e.target.value })} placeholder="Client name" required />
+          )}
+        </div>
+        <div className="space-y-1">
+          <Label>Project</Label>
+          <Input value={values.project} onChange={(e) => setValues({ ...values, project: e.target.value })} placeholder="Project name" required />
+        </div>
+      </div>
+      <div className="grid grid-cols-4 gap-3">
+        <div className="col-span-2 space-y-1">
+          <Label>Notes</Label>
+          <Input value={values.description} onChange={(e) => setValues({ ...values, description: e.target.value })} placeholder="Task description" />
+        </div>
+        <div className="space-y-1">
+          <Label>Hours</Label>
+          <Input type="number" min={0} step={0.25} value={values.hours} onChange={(e) => setValues({ ...values, hours: e.target.value })} required />
+        </div>
+        <div className="space-y-1">
+          <Label>Rate ($/hr)</Label>
+          <Input type="number" min={0} step={5} value={values.rate} onChange={(e) => setValues({ ...values, rate: e.target.value })} required />
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Checkbox id="billable" checked={values.billable} onCheckedChange={(v) => setValues({ ...values, billable: !!v })} />
+        <Label htmlFor="billable">Billable</Label>
+      </div>
+      <DialogFooter>
+        <Button type="submit">{submitLabel}</Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
 export default function TimeLogPage() {
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
@@ -156,64 +220,6 @@ export default function TimeLogPage() {
   const billableAmount = entries.filter((e) => e.billable).reduce((s, e) => s + e.hours * e.rate, 0);
   const unbilledAmount = entries.filter((e) => e.billable && !e.invoice_id).reduce((s, e) => s + e.hours * e.rate, 0);
 
-  const EntryForm = ({ values, setValues, onSubmit, submitLabel }: {
-    values: typeof form;
-    setValues: (v: typeof form) => void;
-    onSubmit: (e: React.FormEvent) => void;
-    submitLabel: string;
-  }) => (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
-        <div className="space-y-1">
-          <Label>Date</Label>
-          <Input type="date" value={values.entry_date} onChange={(e) => setValues({ ...values, entry_date: e.target.value })} required />
-        </div>
-        <div className="space-y-1">
-          <Label>Client</Label>
-          {clientNames.length > 0 ? (
-            <Select value={values.client} onValueChange={(v) => {
-              if (!v) return;
-              const c = clients.find((c) => c.name === v);
-              setValues({ ...values, client: v as string, rate: c?.default_rate ? String(c.default_rate) : values.rate });
-            }}>
-              <SelectTrigger><SelectValue placeholder="Select client" /></SelectTrigger>
-              <SelectContent>
-                {clientNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          ) : (
-            <Input value={values.client} onChange={(e) => setValues({ ...values, client: e.target.value })} placeholder="Client name" required />
-          )}
-        </div>
-        <div className="space-y-1">
-          <Label>Project</Label>
-          <Input value={values.project} onChange={(e) => setValues({ ...values, project: e.target.value })} placeholder="Project name" required />
-        </div>
-      </div>
-      <div className="grid grid-cols-4 gap-3">
-        <div className="col-span-2 space-y-1">
-          <Label>Notes</Label>
-          <Input value={values.description} onChange={(e) => setValues({ ...values, description: e.target.value })} placeholder="Task description" />
-        </div>
-        <div className="space-y-1">
-          <Label>Hours</Label>
-          <Input type="number" min={0} step={0.25} value={values.hours} onChange={(e) => setValues({ ...values, hours: e.target.value })} required />
-        </div>
-        <div className="space-y-1">
-          <Label>Rate ($/hr)</Label>
-          <Input type="number" min={0} step={5} value={values.rate} onChange={(e) => setValues({ ...values, rate: e.target.value })} required />
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <Checkbox id="billable" checked={values.billable} onCheckedChange={(v) => setValues({ ...values, billable: !!v })} />
-        <Label htmlFor="billable">Billable</Label>
-      </div>
-      <DialogFooter>
-        <Button type="submit">{submitLabel}</Button>
-      </DialogFooter>
-    </form>
-  );
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -223,17 +229,17 @@ export default function TimeLogPage() {
 
       {/* Add dialog */}
       <Dialog open={showAdd} onOpenChange={setShowAdd}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader><DialogTitle>Add Time Entry</DialogTitle></DialogHeader>
-          <EntryForm values={form} setValues={setForm} onSubmit={handleAdd} submitLabel="Save Entry" />
+          <EntryForm values={form} setValues={setForm} onSubmit={handleAdd} submitLabel="Save Entry" clients={clients} />
         </DialogContent>
       </Dialog>
 
       {/* Edit dialog */}
       <Dialog open={!!editEntry} onOpenChange={(o) => !o && setEditEntry(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader><DialogTitle>Edit Entry</DialogTitle></DialogHeader>
-          <EntryForm values={editForm} setValues={setEditForm} onSubmit={handleEdit} submitLabel="Save Changes" />
+          <EntryForm values={editForm} setValues={setEditForm} onSubmit={handleEdit} submitLabel="Save Changes" clients={clients} />
         </DialogContent>
       </Dialog>
 

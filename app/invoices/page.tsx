@@ -112,18 +112,17 @@ export default function InvoicesPage() {
     if (!clientName) { toast.error("Client name is required."); return; }
 
     const lineItems: any[] = [];
+    const entryIds = Array.from(selectedEntries);
 
-    if (!editingInvoice) {
-      for (const id of Array.from(selectedEntries)) {
-        const entry = unbilled.find((e) => e.id === id)!;
-        lineItems.push({
-          description: entry.description || entry.project,
-          project: entry.project,
-          hours: entry.hours,
-          rate: entry.rate,
-          amount: entry.hours * entry.rate,
-        });
-      }
+    for (const id of entryIds) {
+      const entry = unbilled.find((e) => e.id === id)!;
+      lineItems.push({
+        description: entry.description || entry.project,
+        project: entry.project,
+        hours: entry.hours,
+        rate: entry.rate,
+        amount: entry.hours * entry.rate,
+      });
     }
 
     for (const row of manualRows) {
@@ -157,11 +156,11 @@ export default function InvoicesPage() {
           po_ref: poRef || null,
           notes: notes || null,
           line_items: lineItems,
+          time_entry_ids: entryIds.length ? entryIds : undefined,
         });
         toast.success(`Invoice ${invNumber} updated.`);
         setEditingInvoice(null);
       } else {
-        const entryIds = Array.from(selectedEntries);
         const inv = await createInvoice({
           invoice_number: invNumber,
           client_name: clientName,
@@ -343,9 +342,9 @@ export default function InvoicesPage() {
         <TabsContent value="create" className="mt-4">
           <form onSubmit={handleCreate} className="space-y-6 max-w-4xl">
 
-            {/* Unbilled entries (create only) */}
-            {!editingInvoice && <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-base">Unbilled Time Entries</CardTitle></CardHeader>
+            {/* Unbilled entries */}
+            <Card>
+              <CardHeader className="pb-2"><CardTitle className="text-base">{editingInvoice ? "Add Unbilled Time Entries" : "Unbilled Time Entries"}</CardTitle></CardHeader>
               <CardContent className="space-y-2">
                 {unbilled.length === 0 ? (
                   <p className="text-muted-foreground text-sm">No unbilled entries.</p>
@@ -378,7 +377,7 @@ export default function InvoicesPage() {
                   </>
                 )}
               </CardContent>
-            </Card>}
+            </Card>
 
             {/* Invoice details */}
             <Card>
