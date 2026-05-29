@@ -105,8 +105,13 @@ export default function InvoicesPage() {
     });
   }
 
+  const linkedEntryIds = new Set(manualRows.map((r) => r.time_entry_id).filter(Boolean));
+  const displayUnbilled = editingInvoice
+    ? unbilled.filter((e) => !linkedEntryIds.has(e.id))
+    : unbilled;
+
   const selectedTotal = Array.from(selectedEntries).reduce((s, id) => {
-    const e = unbilled.find((e) => e.id === id);
+    const e = displayUnbilled.find((e) => e.id === id);
     return s + (e ? e.hours * e.rate : 0);
   }, 0);
 
@@ -209,11 +214,13 @@ export default function InvoicesPage() {
 
   async function handleEdit(inv: InvoiceSummary) {
     try {
-      const [full, items, linked] = await Promise.all([
+      const [full, items, linked, freshUnbilled] = await Promise.all([
         getInvoice(inv.id),
         getInvoiceLineItems(inv.id),
         getTimeEntries({ invoiceId: inv.id }),
+        getTimeEntries({ unbilledOnly: true }),
       ]);
+      setUnbilled(freshUnbilled);
       setEditingInvoice(inv);
       setInvNumber(full.invoice_number);
       setIssueDate(full.issue_date);
@@ -366,11 +373,11 @@ export default function InvoicesPage() {
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-base">{editingInvoice ? "Add Unbilled Time Entries" : "Unbilled Time Entries"}</CardTitle></CardHeader>
               <CardContent className="space-y-2">
-                {unbilled.length === 0 ? (
+                {displayUnbilled.length === 0 ? (
                   <p className="text-muted-foreground text-sm">No unbilled entries.</p>
                 ) : (
                   <>
-                    {unbilled.map((e) => {
+                    {displayUnbilled.map((e) => {
                       const amt = e.hours * e.rate;
                       return (
                         <div key={e.id} className="flex items-center gap-3 py-1">
